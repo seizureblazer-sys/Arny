@@ -185,5 +185,16 @@ service cloud.firestore {
                     request.resource.data.lastRating in ['Easy', 'Good', 'Hard'];
       allow delete: if isOwner(resource.data.userId) || isAdmin();
     }
+
+    match /question_feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() &&
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.questionId is string &&
+                    request.resource.data.feedbackType in ['incorrect', 'poorly_formulated'] &&
+                    request.resource.data.comment is string && request.resource.data.comment.size() < 1000;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
   }
 }

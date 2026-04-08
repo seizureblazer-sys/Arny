@@ -3,7 +3,8 @@ import { collection, query, limit, getDocs, where, addDoc } from 'firebase/fires
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Lock } from 'lucide-react';
+import { Lock, Flag } from 'lucide-react';
+import FeedbackModal from '../components/FeedbackModal';
 
 interface Question {
   id: string;
@@ -37,6 +38,7 @@ export default function PracticeMode() {
   const [showExplanation, setShowExplanation] = useState(false);
   const [score, setScore] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const startPractice = async () => {
     setLoading(true);
@@ -184,13 +186,31 @@ export default function PracticeMode() {
     <div className="max-w-3xl mx-auto space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Practice Mode</h1>
-        <span className="px-4 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full font-medium">
-          Question {currentIndex + 1} of {questions.length}
-        </span>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => {
+              setShowFeedbackModal(true);
+            }}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-500"
+          >
+            <Flag className="w-4 h-4" />
+            Flag Question
+          </button>
+          <span className="px-4 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full font-medium">
+            Question {currentIndex + 1} of {questions.length}
+          </span>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-xl font-medium text-gray-900 dark:text-white mb-8">{currentQ.question_text}</h2>
+        
+        {showFeedbackModal && (
+          <FeedbackModal 
+            questionId={currentQ.id} 
+            onClose={() => setShowFeedbackModal(false)} 
+          />
+        )}
 
         <div className="space-y-3">
           {currentQ.options.map((option, idx) => {

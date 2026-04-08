@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, limit, getDocs, addDoc, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, AlertCircle, Lock, Calendar } from 'lucide-react';
+import { Clock, AlertCircle, Lock, Calendar, Flag } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
+import FeedbackModal from '../components/FeedbackModal';
 
 interface Question {
   id: string;
@@ -47,6 +48,8 @@ export default function ExamMode() {
   const [timeLeft, setTimeLeft] = useState(10 * 60); // 10 minutes for 10 questions
   const [isFinished, setIsFinished] = useState(false);
   const [score, setScore] = useState(0);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [flaggedQuestionId, setFlaggedQuestionId] = useState<string | null>(null);
 
   const [upcomingExams, setUpcomingExams] = useState<Exam[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
@@ -324,7 +327,24 @@ export default function ExamMode() {
       <div className="space-y-6">
         {questions.map((q, idx) => (
           <div key={idx} className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-            <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-6"><span className="text-gray-400 dark:text-gray-500 mr-2">{idx + 1}.</span>{q.question_text}</h2>
+            {showFeedbackModal && flaggedQuestionId === q.id && (
+              <FeedbackModal 
+                questionId={q.id} 
+                onClose={() => setShowFeedbackModal(false)} 
+              />
+            )}
+            <div className="flex justify-between items-start mb-6">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white"><span className="text-gray-400 dark:text-gray-500 mr-2">{idx + 1}.</span>{q.question_text}</h2>
+              <button 
+                onClick={() => {
+                  setFlaggedQuestionId(q.id);
+                  setShowFeedbackModal(true);
+                }}
+                className="text-gray-400 hover:text-red-500"
+              >
+                <Flag className="w-5 h-5" />
+              </button>
+            </div>
             <div className="space-y-3">
               {q.options.map((option, oIdx) => (
                 <label 
