@@ -1,0 +1,7 @@
+{
+  "name": "BCS Preparation Hub",
+  "description": "An AI-driven, all-in-one preparation hub for BCS aspirants in Bangladesh.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the BCS Preparation Hub.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "targetExam": { "type": "string" },
+        "streak": { "type": "number" },
+        "lastLogin": { "type": "string", "format": "date-time" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "tier": { "type": "string", "enum": ["trial", "suchona", "ogrogrami", "shirsho"] },
+        "trialEndsAt": { "type": "string", "format": "date-time" },
+        "subscriptionEndsAt": { "type": "string", "format": "date-time" },
+        "minutesUsed": { "type": "number" },
+        "language": { "type": "string", "enum": ["en", "bn"] },
+        "theme": { "type": "string", "enum": ["light", "dark"] },
+        "unlockedFeatures": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "An MCQ question generated from news or static GK.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "question_text": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "correct_answer": { "type": "string" },
+        "explanation_bn": { "type": "string" },
+        "source_article": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["subject", "topic", "question_text", "options", "correct_answer", "explanation_bn", "createdAt"]
+    },
+    "GKPoint": {
+      "title": "GKPoint",
+      "description": "A General Knowledge point linking current affairs to static GK.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "current_affair": { "type": "string" },
+        "static_gk_link": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["subject", "topic", "current_affair", "static_gk_link", "createdAt"]
+    },
+    "TestResult": {
+      "title": "TestResult",
+      "description": "A user's result from a mock test or practice session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "score": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "subject": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "score", "totalQuestions", "createdAt"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "An upcoming exam or important date.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "date", "createdAt"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A user's app usage session to track minutes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "durationMinutes": { "type": "number" }
+      },
+      "required": ["userId", "startTime", "endTime", "durationMinutes"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles."
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "MCQ questions pool."
+    },
+    "/gk_points/{gkPointId}": {
+      "schema": { "$ref": "#/entities/GKPoint" },
+      "description": "GK Points pool."
+    },
+    "/test_results/{resultId}": {
+      "schema": { "$ref": "#/entities/TestResult" },
+      "description": "User test results."
+    },
+    "/exams/{examId}": {
+      "schema": { "$ref": "#/entities/Exam" },
+      "description": "Upcoming exams and important dates."
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "User session tracking for minutes used."
+    }
+  }
+}

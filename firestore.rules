@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "seizureblazer@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.email is string &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('targetExam' in data) || data.targetExam is string) &&
+             (!('streak' in data) || data.streak is number) &&
+             (!('lastLogin' in data) || data.lastLogin is string) &&
+             (!('tier' in data) || data.tier in ['trial', 'suchona', 'ogrogrami', 'shirsho']) &&
+             (!('trialEndsAt' in data) || data.trialEndsAt is string) &&
+             (!('subscriptionEndsAt' in data) || data.subscriptionEndsAt is string) &&
+             (!('minutesUsed' in data) || data.minutesUsed is number) &&
+             (!('language' in data) || data.language in ['en', 'bn']) &&
+             (!('theme' in data) || data.theme in ['light', 'dark']) &&
+             (!('unlockedFeatures' in data) || data.unlockedFeatures is list) &&
+             (!('authCode' in data) || data.authCode is string || data.authCode == null) &&
+             (!('authCodeExpiresAt' in data) || data.authCodeExpiresAt is string || data.authCodeExpiresAt == null) &&
+             (!('pendingTier' in data) || data.pendingTier is string || data.pendingTier == null) &&
+             (!('pendingSubscriptionEndsAt' in data) || data.pendingSubscriptionEndsAt is string || data.pendingSubscriptionEndsAt == null) &&
+             (!('pendingUnlockedFeatures' in data) || data.pendingUnlockedFeatures is list || data.pendingUnlockedFeatures == null) &&
+             (!('boundDeviceId' in data) || data.boundDeviceId is string || data.boundDeviceId == null) &&
+             data.createdAt is string;
+    }
+
+    function isValidQuestion(data) {
+      return data.subject is string && data.subject.size() > 0 && data.subject.size() < 100 &&
+             data.topic is string && data.topic.size() > 0 && data.topic.size() < 200 &&
+             data.question_text is string && data.question_text.size() > 0 && data.question_text.size() < 1000 &&
+             data.options is list && data.options.size() == 4 &&
+             data.correct_answer is string && data.correct_answer.size() > 0 && data.correct_answer.size() < 500 &&
+             data.explanation_bn is string && data.explanation_bn.size() > 0 && data.explanation_bn.size() < 2000 &&
+             data.createdAt is string;
+    }
+
+    function isValidGKPoint(data) {
+      return data.subject is string && data.subject.size() > 0 && data.subject.size() < 100 &&
+             data.topic is string && data.topic.size() > 0 && data.topic.size() < 200 &&
+             data.current_affair is string && data.current_affair.size() > 0 && data.current_affair.size() < 1000 &&
+             data.static_gk_link is string && data.static_gk_link.size() > 0 && data.static_gk_link.size() < 1000 &&
+             data.createdAt is string;
+    }
+
+    function isValidTestResult(data) {
+      return data.userId is string &&
+             data.score is number && data.score >= 0 &&
+             data.totalQuestions is number && data.totalQuestions > 0 &&
+             (!('subject' in data) || data.subject is string) &&
+             data.createdAt is string;
+    }
+
+    function isValidExam(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.date is string &&
+             (!('description' in data) || data.description is string) &&
+             data.createdAt is string;
+    }
+
+    function isValidSession(data) {
+      return data.userId is string &&
+             data.startTime is string &&
+             data.endTime is string &&
+             data.durationMinutes is number && data.durationMinutes >= 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin()) &&
+                    (!('tier' in request.resource.data) || request.resource.data.tier == 'trial' || isAdmin());
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+                    (
+                      (
+                        (!('tier' in request.resource.data) || request.resource.data.tier == resource.data.tier) &&
+                        (!('trialEndsAt' in request.resource.data) || request.resource.data.trialEndsAt == resource.data.trialEndsAt) &&
+                        (!('subscriptionEndsAt' in request.resource.data) || request.resource.data.subscriptionEndsAt == resource.data.subscriptionEndsAt) &&
+                        (!('unlockedFeatures' in request.resource.data) || request.resource.data.unlockedFeatures == resource.data.unlockedFeatures)
+                      ) ||
+                      (
+                        resource.data.authCode != null &&
+                        request.resource.data.authCode == null &&
+                        request.resource.data.tier == resource.data.pendingTier &&
+                        request.resource.data.subscriptionEndsAt == resource.data.pendingSubscriptionEndsAt &&
+                        request.resource.data.unlockedFeatures == resource.data.pendingUnlockedFeatures
+                      )
+                    ) &&
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.createdAt == resource.data.createdAt) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /questions/{questionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidQuestion(request.resource.data);
+      allow update: if isAdmin() && isValidQuestion(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /gk_points/{gkPointId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidGKPoint(request.resource.data);
+      allow update: if isAdmin() && isValidGKPoint(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /test_results/{resultId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(request.resource.data.userId) && isValidTestResult(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidTestResult(request.resource.data) &&
+                    request.resource.data.userId == resource.data.userId &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /reminders/{reminderId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(request.resource.data.userId) && 
+                    request.resource.data.task is string && request.resource.data.task.size() > 0 &&
+                    request.resource.data.dueAt is string;
+      allow update: if isOwner(resource.data.userId) &&
+                    request.resource.data.userId == resource.data.userId &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+
+    match /exams/{examId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidExam(request.resource.data);
+      allow update: if isAdmin() && isValidExam(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(request.resource.data.userId) && isValidSession(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidSession(request.resource.data) &&
+                    request.resource.data.userId == resource.data.userId;
+      allow delete: if isAdmin();
+    }
+
+    match /gk_progress/{progressId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(request.resource.data.userId) &&
+                    request.resource.data.gkPointId is string &&
+                    request.resource.data.nextReviewDate is string &&
+                    request.resource.data.interval is number &&
+                    request.resource.data.lastRating in ['Easy', 'Good', 'Hard'];
+      allow update: if isOwner(resource.data.userId) &&
+                    request.resource.data.userId == resource.data.userId &&
+                    request.resource.data.gkPointId == resource.data.gkPointId &&
+                    request.resource.data.nextReviewDate is string &&
+                    request.resource.data.interval is number &&
+                    request.resource.data.lastRating in ['Easy', 'Good', 'Hard'];
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+  }
+}
