@@ -3,9 +3,13 @@ import { collection, query, limit, getDocs, where, addDoc, setDoc, doc, getDoc, 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Lock, Flag, Clock, Sparkles, Loader2 } from 'lucide-react';
+import { Lock, Flag, Clock, Sparkles, Loader2, Search } from 'lucide-react';
 import FeedbackModal from '../components/FeedbackModal';
+import { GoogleGenAI } from "@google/genai";
 import Markdown from 'react-markdown';
+import { toast } from 'react-hot-toast';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 interface Question {
   id: string;
@@ -48,6 +52,7 @@ export default function PracticeMode() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [activeSession, setActiveSession] = useState<any>(null);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (!user || hasStarted) return;
@@ -116,12 +121,30 @@ export default function PracticeMode() {
     try {
       let q;
       if (selectedSubject === 'All Subjects') {
-        q = query(collection(db, 'questions'), limit(10));
+        q = query(collection(db, 'questions'), limit(50));
       } else {
-        q = query(collection(db, 'questions'), where('subject', '==', selectedSubject), limit(10));
+        q = query(collection(db, 'questions'), where('subject', '==', selectedSubject), limit(50));
       }
       const snapshot = await getDocs(q);
-      const qs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Question));
+      let qs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Question));
+      
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        qs = qs.filter(q => 
+          q.question_text.toLowerCase().includes(term) || 
+          (q as any).topic?.toLowerCase().includes(term)
+        );
+      }
+
+      // Limit to 10 for the session
+      qs = qs.slice(0, 10);
+
+      if (qs.length === 0) {
+        toast.error("No questions found matching your search.");
+        setLoading(false);
+        return;
+      }
+
       setQuestions(qs);
       setHasStarted(true);
       if (isTimerEnabled) {
@@ -216,50 +239,26 @@ export default function PracticeMode() {
 
   const generateAiExplanation = async (question: Question, chosenOption: string) => {
     setIsGeneratingAi(true);
-    setAiExplanation('');
     try {
-      const systemPrompt = "As an expert BCS (Bangladesh Civil Service) exam tutor, explain why the chosen answer is incorrect and why the correct answer is right. Provide a detailed, encouraging explanation in both English and Bengali if possible. Focus on the logic and concepts.";
       const prompt = `
+        As an expert BCS (Bangladesh Civil Service) exam tutor, explain why the chosen answer is incorrect and why the correct answer is right.
+        
         Question: ${question.question_text}
         Options: ${question.options.join(', ')}
         Chosen Answer: ${chosenOption}
         Correct Answer: ${question.correct_answer}
         ${question.rationale ? `Rationale provided: ${question.rationale}` : ''}
         ${question.explanation_bn ? `Base Explanation: ${question.explanation_bn}` : ''}
+        
+        Provide a detailed, encouraging explanation in both English and Bengali if possible. Focus on the logic and concepts.
       `;
 
-      const response = await fetch('/api/ai/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemPrompt })
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
       });
 
-      if (!response.ok) throw new Error('AI Stream failed');
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedText = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('0:')) {
-              try {
-                const text = JSON.parse(line.substring(2));
-                accumulatedText += text;
-                setAiExplanation(accumulatedText);
-              } catch (e) {
-                // Ignore partial chunks
-              }
-            }
-          }
-        }
-      }
+      setAiExplanation(response.text);
     } catch (error) {
       console.error("Error generating AI explanation:", error);
       setAiExplanation("Sorry, I couldn't generate a detailed explanation right now. Please refer to the base explanation below.");
@@ -335,6 +334,19 @@ export default function PracticeMode() {
           </p>
           
           <div className="max-w-xs mx-auto mb-8 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Search Topics or Questions</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input 
+                  type="text"
+                  placeholder="e.g. History, Science..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                />
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Select Subject</label>
               <select 

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, limit, onSnapshot, getDocs, addDoc, where, orderBy, setDoc, doc, deleteDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, AlertCircle, Lock, Calendar, Flag, Zap } from 'lucide-react';
+import { Clock, AlertCircle, Lock, Calendar, Flag, Zap, Search } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import FeedbackModal from '../components/FeedbackModal';
 import LimitModal from '../components/LimitModal';
 import { AnimatePresence } from 'motion/react';
+import { toast } from 'react-hot-toast';
 
 interface Question {
   id: string;
@@ -55,6 +56,7 @@ export default function ExamMode() {
   const [activeSession, setActiveSession] = useState<any>(null);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [upcomingExams, setUpcomingExams] = useState<Exam[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
@@ -153,12 +155,30 @@ export default function ExamMode() {
     try {
       let q;
       if (selectedSubject === 'All Subjects') {
-        q = query(collection(db, 'questions'), limit(10));
+        q = query(collection(db, 'questions'), limit(50));
       } else {
-        q = query(collection(db, 'questions'), where('subject', '==', selectedSubject), limit(10));
+        q = query(collection(db, 'questions'), where('subject', '==', selectedSubject), limit(50));
       }
       const snapshot = await getDocs(q);
-      const qs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Question));
+      let qs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Question));
+      
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        qs = qs.filter(q => 
+          q.question_text.toLowerCase().includes(term) || 
+          (q as any).topic?.toLowerCase().includes(term)
+        );
+      }
+
+      // Limit to 10 for the session
+      qs = qs.slice(0, 10);
+
+      if (qs.length === 0) {
+        toast.error("No questions found matching your search.");
+        setLoading(false);
+        return;
+      }
+
       setQuestions(qs);
       setHasStarted(true);
       setTimeLeft(10 * 60);
@@ -300,8 +320,22 @@ export default function ExamMode() {
             Once you start, the timer cannot be paused.
           </p>
 
-          <div className="max-w-xs mx-auto mb-8">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Select Subject</label>
+          <div className="max-w-xs mx-auto mb-8 space-y-4">
+            <div className="text-left">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Search Topics or Questions</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input 
+                  type="text"
+                  placeholder="e.g. History, Science..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="text-left">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Subject</label>
             <select 
               value={selectedSubject}
               onChange={(e) => handleSubjectChange(e.target.value)}
@@ -312,8 +346,9 @@ export default function ExamMode() {
               ))}
             </select>
           </div>
+        </div>
 
-          <button 
+        <button 
             onClick={startExam}
             disabled={loading}
             className="px-8 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50"
