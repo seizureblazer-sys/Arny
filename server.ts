@@ -2,36 +2,17 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import * as cheerio from "cheerio";
 import path from "path";
-import Stripe from "stripe";
 import dotenv from "dotenv";
+import { google } from "@ai-sdk/google";
+import { streamText, pipeDataStreamToResponse } from "ai";
 
 dotenv.config();
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
-
-  // Stripe checkout session creation
-  app.post("/api/create-checkout-session", async (req, res) => {
-    try {
-      const { priceId, userId } = req.body;
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [{ price: priceId, quantity: 1 }],
-        mode: 'subscription',
-        success_url: `${process.env.APP_URL}/dashboard?success=true`,
-        cancel_url: `${process.env.APP_URL}/pricing`,
-        client_reference_id: userId,
-      });
-      res.json({ id: session.id });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
   // API route to fetch and extract text from a URL
   app.post("/api/fetch-url", async (req, res) => {
@@ -41,11 +22,24 @@ async function startServer() {
         return res.status(400).json({ error: "URL is required" });
       }
 
+      // Validate URL format
+      try {
+        new URL(url);
+      } catch {
+        return res.status(400).json({ error: "Invalid URL format" });
+      }
+
+      // Add timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
       const response = await fetch(url, {
+        signal: controller.signal,
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         return res.status(response.status).json({ error: `Failed to fetch URL: ${response.statusText}` });
@@ -54,25 +48,53 @@ async function startServer() {
       const html = await response.text();
       const $ = cheerio.load(html);
 
-      // Remove scripts, styles, nav, footer, etc. to get clean text
-      $('script, style, nav, footer, header, aside, noscript, iframe').remove();
+      // Remove non-content elements
+      $('script, style, nav, footer, header, aside, noscript, iframe, svg, button, input, select, textarea, menu, form').remove();
 
-      // Try to find the main article content first
-      let content = $('article').text();
-      if (!content.trim()) {
-        content = $('main').text();
-      }
-      if (!content.trim()) {
-        content = $('body').text();
-      }
-
-      // Clean up whitespace
+      // Extract main content
+      let content = $('article').text() || $('main').text() || $('body').text();
+      
+      // Clean up whitespace and line breaks
       const cleanText = content.replace(/\s+/g, ' ').trim();
+
+      if (cleanText.length < 100) {
+        return res.status(422).json({ error: "Could not extract sufficient content from the page." });
+      }
 
       res.json({ text: cleanText });
     } catch (error: any) {
       console.error("Error fetching URL:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch URL" });
+      if (error.name === 'AbortError') {
+        res.status(504).json({ error: "Request timed out" });
+      } else {
+        res.status(500).json({ error: error.message || "Failed to fetch URL" });
+      }
+    }
+  });
+
+  // AI Streaming Endpoint
+  app.post("/api/ai/stream", async (req, res) => {
+    try {
+      const { prompt, systemPrompt } = req.body;
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
+      }
+
+      const result = await streamText({
+        model: google("gemini-1.5-flash"),
+        system: systemPrompt || "You are a helpful assistant.",
+        prompt: prompt,
+      });
+
+      pipeDataStreamToResponse(res, {
+        execute: async (dataStream) => {
+          result.mergeIntoDataStream(dataStream);
+        },
+      });
+    } catch (error: any) {
+      console.error("AI Stream Error:", error);
+      res.status(500).json({ error: error.message || "AI Stream failed" });
     }
   });
 

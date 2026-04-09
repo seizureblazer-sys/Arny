@@ -195,23 +195,23 @@ export default function InterviewMode() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">AI Viva Simulator</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2">Practice your interview skills with an AI BPSC Board Member.</p>
+    <div className="max-w-4xl mx-auto h-[calc(100vh-12rem)] sm:h-[calc(100vh-8rem)] flex flex-col">
+      <div className="mb-4 sm:mb-6">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">AI Viva Simulator</h1>
+        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1 sm:mt-2">Practice your interview skills with an AI BPSC Board Member.</p>
       </div>
 
       <div className="flex-1 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
         {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           {messages.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-2xl p-4 ${
+              <div className={`max-w-[90%] sm:max-w-[80%] rounded-2xl p-3 sm:p-4 ${
                 msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-tl-none'
+                  ? 'bg-blue-600 text-white rounded-tr-none shadow-md' 
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-tl-none shadow-sm'
               }`}>
-                <div className={`prose ${msg.role === 'user' || document.documentElement.classList.contains('dark') ? 'prose-invert' : ''} max-w-none`}>
+                <div className={`prose prose-sm sm:prose-base ${msg.role === 'user' || document.documentElement.classList.contains('dark') ? 'prose-invert' : ''} max-w-none`}>
                   <ReactMarkdown>{msg.text}</ReactMarkdown>
                 </div>
               </div>
@@ -219,9 +219,9 @@ export default function InterviewMode() {
           ))}
           {isProcessing && (
             <div className="flex justify-start">
-              <div className="bg-gray-100 dark:bg-gray-700 rounded-2xl rounded-tl-none p-4 flex items-center space-x-2">
-                <Loader2 className="w-5 h-5 animate-spin text-gray-500 dark:text-gray-400" />
-                <span className="text-gray-500 dark:text-gray-400">Board Member is thinking...</span>
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-2xl rounded-tl-none p-3 sm:p-4 flex items-center space-x-2 shadow-sm">
+                <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-gray-500 dark:text-gray-400" />
+                <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Thinking...</span>
               </div>
             </div>
           )}
@@ -229,18 +229,18 @@ export default function InterviewMode() {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
+        <div className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-end space-x-2">
             <button
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isProcessing}
-              className={`p-4 rounded-xl flex-shrink-0 transition-colors ${
+              className={`p-3 sm:p-4 rounded-xl flex-shrink-0 transition-colors ${
                 isRecording 
                   ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50' 
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
               } disabled:opacity-50`}
             >
-              {isRecording ? <MicOff className="w-6 h-6 animate-pulse" /> : <Mic className="w-6 h-6" />}
+              {isRecording ? <MicOff className="w-5 h-5 sm:w-6 sm:h-6 animate-pulse" /> : <Mic className="w-5 h-5 sm:w-6 sm:h-6" />}
             </button>
             
             <div className="flex-1 relative">
@@ -253,23 +253,23 @@ export default function InterviewMode() {
                     handleSendText(inputText);
                   }
                 }}
-                placeholder="Type your answer or use the microphone..."
-                className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 pr-12 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none dark:text-white"
-                rows={2}
+                placeholder="Type your answer..."
+                className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 pr-10 sm:pr-12 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none dark:text-white text-sm sm:text-base"
+                rows={1}
                 disabled={isProcessing || isRecording}
               />
               <button
                 onClick={() => handleSendText(inputText)}
                 disabled={!inputText.trim() || isProcessing || isRecording}
-                className="absolute right-2 bottom-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="absolute right-1.5 bottom-1.5 p-1.5 sm:p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
-                <Send className="w-5 h-5" />
+                <Send className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
           </div>
           {isRecording && (
-            <p className="text-center text-sm text-red-500 dark:text-red-400 mt-2 font-medium animate-pulse">
-              Recording... Click the microphone icon to stop and send.
+            <p className="text-center text-[10px] sm:text-xs text-red-500 dark:text-red-400 mt-2 font-medium animate-pulse">
+              Recording... Tap to stop and send.
             </p>
           )}
         </div>

@@ -47,6 +47,40 @@ service cloud.firestore {
              (!('pendingSubscriptionEndsAt' in data) || data.pendingSubscriptionEndsAt is string || data.pendingSubscriptionEndsAt == null) &&
              (!('pendingUnlockedFeatures' in data) || data.pendingUnlockedFeatures is list || data.pendingUnlockedFeatures == null) &&
              (!('boundDeviceId' in data) || data.boundDeviceId is string || data.boundDeviceId == null) &&
+             (!('sscYear' in data) || data.sscYear is string) &&
+             (!('hscYear' in data) || data.hscYear is string) &&
+             (!('whatsapp' in data) || data.whatsapp is string) &&
+             (!('school' in data) || data.school is string) &&
+             (!('college' in data) || data.college is string) &&
+             (!('bio' in data) || data.bio is string) &&
+             (!('isProfileComplete' in data) || data.isProfileComplete is bool) &&
+             (!('preparationScore' in data) || data.preparationScore is number) &&
+             data.createdAt is string;
+    }
+
+    function isValidMegaExam(data) {
+      return data.title is string &&
+             data.startTime is string &&
+             data.durationMinutes is number &&
+             data.fee is number &&
+             data.status in ['pending', 'approved', 'completed'] &&
+             data.createdAt is string;
+    }
+
+    function isValidMegaExamRegistration(data) {
+      return data.userId is string &&
+             data.examId is string &&
+             data.status in ['registered', 'paid', 'completed'] &&
+             (!('score' in data) || data.score is number) &&
+             data.createdAt is string;
+    }
+
+    function isValidNotification(data) {
+      return data.userId is string &&
+             data.title is string &&
+             data.message is string &&
+             data.type in ['info', 'success', 'warning', 'error'] &&
+             data.isRead is bool &&
              data.createdAt is string;
     }
 
@@ -57,6 +91,8 @@ service cloud.firestore {
              data.options is list && data.options.size() == 4 &&
              data.correct_answer is string && data.correct_answer.size() > 0 && data.correct_answer.size() < 500 &&
              data.explanation_bn is string && data.explanation_bn.size() > 0 && data.explanation_bn.size() < 2000 &&
+             (!('rationale' in data) || (data.rationale is string && data.rationale.size() < 1000)) &&
+             (!('difficulty' in data) || data.difficulty in ['Easy', 'Medium', 'Hard']) &&
              data.createdAt is string;
     }
 
@@ -176,13 +212,54 @@ service cloud.firestore {
                     request.resource.data.gkPointId is string &&
                     request.resource.data.nextReviewDate is string &&
                     request.resource.data.interval is number &&
-                    request.resource.data.lastRating in ['Easy', 'Good', 'Hard'];
+                    request.resource.data.easeFactor is number &&
+                    request.resource.data.repetitionCount is number &&
+                    request.resource.data.lastRating in ['Forgot', 'Hard', 'Good', 'Easy'];
       allow update: if isOwner(resource.data.userId) &&
                     request.resource.data.userId == resource.data.userId &&
                     request.resource.data.gkPointId == resource.data.gkPointId &&
                     request.resource.data.nextReviewDate is string &&
                     request.resource.data.interval is number &&
-                    request.resource.data.lastRating in ['Easy', 'Good', 'Hard'];
+                    request.resource.data.easeFactor is number &&
+                    request.resource.data.repetitionCount is number &&
+                    request.resource.data.lastRating in ['Forgot', 'Hard', 'Good', 'Easy'];
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+
+    match /active_exam_sessions/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /active_practice_sessions/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /mega_exams/{examId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidMegaExam(request.resource.data);
+      allow update: if isAdmin() && isValidMegaExam(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /mega_exam_registrations/{regId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidMegaExamRegistration(request.resource.data);
+      allow update: if (isOwner(resource.data.userId) || isAdmin()) && isValidMegaExamRegistration(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if (isOwner(request.resource.data.userId) || isAdmin()) && isValidNotification(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
+                    request.resource.data.isRead is bool;
       allow delete: if isOwner(resource.data.userId) || isAdmin();
     }
 

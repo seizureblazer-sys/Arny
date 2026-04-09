@@ -73,34 +73,34 @@ export default function TeachMode() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Teach Mode</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2">Enter any topic from the BCS syllabus to get an AI-generated micro-lesson.</p>
+      <div className="text-center mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Teach Mode</h1>
+        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-2">Enter any topic from the BCS syllabus to get an AI-generated micro-lesson.</p>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 p-2 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex items-center">
-        <div className="pl-4">
-          <Search className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+      <div className="bg-white dark:bg-gray-800 p-1.5 sm:p-2 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+        <div className="flex items-center flex-1 px-2">
+          <Search className="h-5 w-5 text-gray-400 dark:text-gray-500 ml-2" />
+          <input
+            type="text"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLearn()}
+            placeholder="e.g., The Constitution of Bangladesh..."
+            className="flex-1 px-3 py-3 outline-none text-sm sm:text-base text-gray-700 dark:text-gray-300 bg-transparent"
+          />
         </div>
-        <input
-          type="text"
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleLearn()}
-          placeholder="e.g., The Constitution of Bangladesh, Liberation War 1971, Padma Bridge..."
-          className="flex-1 px-4 py-3 outline-none text-gray-700 dark:text-gray-300 bg-transparent"
-        />
         <button
           onClick={handleLearn}
           disabled={loading || !topic.trim()}
-          className="px-6 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center"
         >
           {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Learn Now'}
         </button>
       </div>
 
       {lesson && (
-        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 prose prose-blue dark:prose-invert max-w-none">
+        <div className="bg-white dark:bg-gray-800 p-5 sm:p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 prose prose-sm sm:prose-base prose-blue dark:prose-invert max-w-none overflow-hidden">
           <ReactMarkdown>{lesson}</ReactMarkdown>
         </div>
       )}

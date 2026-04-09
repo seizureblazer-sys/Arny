@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, limit, getDocs, addDoc, where, orderBy } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot, getDocs, addDoc, where, orderBy, setDoc, doc, deleteDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, AlertCircle, Lock, Calendar, Flag } from 'lucide-react';
+import { Clock, AlertCircle, Lock, Calendar, Flag, Zap } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import FeedbackModal from '../components/FeedbackModal';
+import LimitModal from '../components/LimitModal';
+import { AnimatePresence } from 'motion/react';
 
 interface Question {
   id: string;
@@ -50,6 +52,9 @@ export default function ExamMode() {
   const [score, setScore] = useState(0);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [flaggedQuestionId, setFlaggedQuestionId] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<any>(null);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   const [upcomingExams, setUpcomingExams] = useState<Exam[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
@@ -59,32 +64,91 @@ export default function ExamMode() {
   };
 
   useEffect(() => {
-    const fetchExams = async () => {
-      setLoadingExams(true);
-      try {
-        const now = new Date().toISOString();
-        let q;
-        if (selectedSubject === 'All Subjects') {
-          q = query(collection(db, 'exams'), where('date', '>=', now), orderBy('date', 'asc'), limit(10));
-        } else {
-          q = query(collection(db, 'exams'), where('date', '>=', now), where('subject', '==', selectedSubject), orderBy('date', 'asc'), limit(10));
-        }
-        const snapshot = await getDocs(q);
-        const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Exam));
-        setUpcomingExams(examsData);
-      } catch (error) {
-        console.error("Error fetching exams", error);
-      } finally {
-        setLoadingExams(false);
-      }
-    };
+    if (hasStarted) return;
 
-    if (!hasStarted) {
-      fetchExams();
+    setLoadingExams(true);
+    const now = new Date().toISOString();
+    let q;
+    if (selectedSubject === 'All Subjects') {
+      q = query(collection(db, 'exams'), where('date', '>=', now), orderBy('date', 'asc'), limit(10));
+    } else {
+      q = query(collection(db, 'exams'), where('date', '>=', now), where('subject', '==', selectedSubject), orderBy('date', 'asc'), limit(10));
     }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Exam));
+      setUpcomingExams(examsData);
+      setLoadingExams(false);
+    }, (error) => {
+      console.error("Error fetching exams", error);
+      setLoadingExams(false);
+    });
+
+    return () => unsubscribe();
   }, [selectedSubject, hasStarted]);
 
+  useEffect(() => {
+    if (!user || hasStarted) return;
+
+    const checkSession = async () => {
+      const sessionDoc = await getDoc(doc(db, 'active_exam_sessions', user.uid));
+      if (sessionDoc.exists()) {
+        setActiveSession(sessionDoc.data());
+        setShowResumePrompt(true);
+      }
+    };
+    checkSession();
+  }, [user, hasStarted]);
+
+  const saveSession = async (currentAnswers: any, currentTime: number, currentQuestions: any) => {
+    if (!user || isFinished) return;
+    try {
+      await setDoc(doc(db, 'active_exam_sessions', user.uid), {
+        userId: user.uid,
+        questions: currentQuestions,
+        answers: currentAnswers,
+        timeLeft: currentTime,
+        selectedSubject,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error saving session", error);
+    }
+  };
+
+  const resumeSession = () => {
+    if (!activeSession) return;
+    setQuestions(activeSession.questions);
+    setAnswers(activeSession.answers);
+    setTimeLeft(activeSession.timeLeft);
+    setHasStarted(true);
+    setShowResumePrompt(false);
+    if (activeSession.selectedSubject !== selectedSubject) {
+      setSearchParams({ subject: activeSession.selectedSubject });
+    }
+  };
+
+  const discardSession = async () => {
+    if (user) {
+      await deleteDoc(doc(db, 'active_exam_sessions', user.uid));
+    }
+    setActiveSession(null);
+    setShowResumePrompt(false);
+  };
+
   const startExam = async () => {
+    if (!user || !userData) return;
+
+    // Check limits
+    const tier = userData.tier || 'trial';
+    const limitCount = tier === 'trial' ? 1 : tier === 'trial' ? 5 : Infinity; // Adjusted for trial/basic
+    const currentCount = userData.dailyUsage?.examsCount || 0;
+
+    if (currentCount >= limitCount && tier !== 'pro' && tier !== 'elite') {
+      setShowLimitModal(true);
+      return;
+    }
+
     setLoading(true);
     try {
       let q;
@@ -108,15 +172,35 @@ export default function ExamMode() {
   useEffect(() => {
     let timer: any;
     if (hasStarted && !isFinished && timeLeft > 0 && questions.length > 0) {
-      timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          const next = prev - 1;
+          if (next % 10 === 0) { // Save every 10 seconds
+            saveSession(answers, next, questions);
+          }
+          return next;
+        });
+      }, 1000);
     } else if (timeLeft === 0 && !isFinished && questions.length > 0) {
       handleSubmit();
     }
     return () => clearInterval(timer);
-  }, [hasStarted, isFinished, timeLeft, questions.length]);
+  }, [hasStarted, isFinished, timeLeft, questions.length, answers, questions]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasStarted && !isFinished) {
+        saveSession(answers, timeLeft, questions);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasStarted, isFinished, answers, timeLeft, questions]);
 
   const handleAnswer = (index: number, option: string) => {
-    setAnswers(prev => ({ ...prev, [index]: option }));
+    const newAnswers = { ...answers, [index]: option };
+    setAnswers(newAnswers);
+    saveSession(newAnswers, timeLeft, questions);
   };
 
   const handleSubmit = async () => {
@@ -128,6 +212,13 @@ export default function ExamMode() {
     setScore(currentScore);
 
     if (user) {
+      await deleteDoc(doc(db, 'active_exam_sessions', user.uid));
+      
+      // Update daily usage count
+      await updateDoc(doc(db, 'users', user.uid), {
+        'dailyUsage.examsCount': (userData.dailyUsage?.examsCount || 0) + 1
+      });
+
       await addDoc(collection(db, 'test_results'), {
         userId: user.uid,
         score: currentScore,
@@ -173,6 +264,32 @@ export default function ExamMode() {
   if (!hasStarted) {
     return (
       <div className="max-w-4xl mx-auto space-y-8">
+        <AnimatePresence>
+          {showLimitModal && (
+            <LimitModal 
+              onClose={() => setShowLimitModal(false)} 
+              feature="Mock Exams" 
+              limit={userData?.tier === 'trial' ? 1 : 5} 
+            />
+          )}
+        </AnimatePresence>
+        {showResumePrompt && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-6 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 dark:bg-blue-800 rounded-full">
+                <Clock className="w-6 h-6 text-blue-600 dark:text-blue-300" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100">Resume Previous Session?</h3>
+                <p className="text-sm text-blue-700 dark:text-blue-300">You have an unfinished {activeSession.selectedSubject} exam from {new Date(activeSession.updatedAt).toLocaleString()}.</p>
+              </div>
+            </div>
+            <div className="flex gap-3 w-full sm:w-auto">
+              <button onClick={discardSession} className="flex-1 sm:flex-none px-6 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700">Discard</button>
+              <button onClick={resumeSession} className="flex-1 sm:flex-none px-6 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700">Resume Exam</button>
+            </div>
+          </div>
+        )}
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
           <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-6">
             <AlertCircle className="w-10 h-10" />
@@ -304,52 +421,52 @@ export default function ExamMode() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 sticky top-4 z-10">
+    <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 sticky top-4 z-10 gap-4">
         <h1 className="text-xl font-bold text-gray-900 dark:text-white">Mock Test</h1>
-        <div className="flex items-center space-x-6">
-          <div className="text-sm font-medium text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6 w-full sm:w-auto">
+          <div className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">
             Answered: {Object.keys(answers).length} / {questions.length}
           </div>
-          <div className={`flex items-center px-4 py-2 rounded-lg font-mono font-bold ${timeLeft < 60 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
-            <Clock className="w-5 h-5 mr-2" />
+          <div className={`flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-mono font-bold text-sm sm:text-base ${timeLeft < 60 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
+            <Clock className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
             {formatTime(timeLeft)}
           </div>
           <button 
             onClick={handleSubmit}
-            className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex-1 sm:flex-none px-4 sm:px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
           >
-            Submit Test
+            Submit
           </button>
         </div>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         {questions.map((q, idx) => (
-          <div key={idx} className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <div key={idx} className="bg-white dark:bg-gray-800 p-5 sm:p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
             {showFeedbackModal && flaggedQuestionId === q.id && (
               <FeedbackModal 
                 questionId={q.id} 
                 onClose={() => setShowFeedbackModal(false)} 
               />
             )}
-            <div className="flex justify-between items-start mb-6">
-              <h2 className="text-lg font-medium text-gray-900 dark:text-white"><span className="text-gray-400 dark:text-gray-500 mr-2">{idx + 1}.</span>{q.question_text}</h2>
+            <div className="flex justify-between items-start mb-4 sm:mb-6">
+              <h2 className="text-base sm:text-lg font-medium text-gray-900 dark:text-white leading-relaxed"><span className="text-gray-400 dark:text-gray-500 mr-2">{idx + 1}.</span>{q.question_text}</h2>
               <button 
                 onClick={() => {
                   setFlaggedQuestionId(q.id);
                   setShowFeedbackModal(true);
                 }}
-                className="text-gray-400 hover:text-red-500"
+                className="text-gray-400 hover:text-red-500 p-1"
               >
                 <Flag className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {q.options.map((option, oIdx) => (
                 <label 
                   key={oIdx} 
-                  className={`flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${answers[idx] === option ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-800'}`}
+                  className={`flex items-center p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all ${answers[idx] === option ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-800'}`}
                 >
                   <input 
                     type="radio" 
@@ -359,7 +476,7 @@ export default function ExamMode() {
                     onChange={() => handleAnswer(idx, option)}
                     className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                   />
-                  <span className="ml-3 text-gray-700 dark:text-gray-300">{option}</span>
+                  <span className="ml-3 text-sm sm:text-base text-gray-700 dark:text-gray-300">{option}</span>
                 </label>
               ))}
             </div>
@@ -367,10 +484,10 @@ export default function ExamMode() {
         ))}
       </div>
       
-      <div className="flex justify-end">
+      <div className="flex justify-center sm:justify-end">
         <button 
           onClick={handleSubmit}
-          className="px-8 py-4 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors shadow-lg"
+          className="w-full sm:w-auto px-8 py-4 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors shadow-lg"
         >
           Finish & Submit Test
         </button>

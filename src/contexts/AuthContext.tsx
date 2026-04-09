@@ -1,5 +1,14 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut, updateProfile } from 'firebase/auth';
+import { 
+  User, 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  signOut, 
+  updateProfile,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail
+} from 'firebase/auth';
 import { auth, googleProvider, db } from '../firebase';
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, collection, addDoc } from 'firebase/firestore';
 
@@ -9,6 +18,9 @@ interface AuthContextType {
   loading: boolean;
   isDeviceAuthorized: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, pass: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUserProfile: (displayName: string, targetExam: string) => Promise<void>;
 }
@@ -19,6 +31,9 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isDeviceAuthorized: false,
   signInWithGoogle: async () => {},
+  signInWithEmail: async () => {},
+  signUpWithEmail: async () => {},
+  resetPassword: async () => {},
   logout: async () => {},
   updateUserProfile: async () => {},
 });
@@ -55,7 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!userSnap.exists()) {
           const now = new Date();
           const trialEndsAt = new Date(now);
-          trialEndsAt.setMonth(now.getMonth() + 3); // 3 months free trial
+          trialEndsAt.setDate(now.getDate() + 7); // 7 days free trial as opening gift
           
           await setDoc(userRef, {
             uid: currentUser.uid,
@@ -69,7 +84,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             tier: 'trial',
             trialEndsAt: trialEndsAt.toISOString(),
             minutesUsed: 0,
-            unlockedFeatures: ['practice', 'exam', 'interview']
+            unlockedFeatures: ['practice', 'exam', 'interview'],
+            isProfileComplete: false,
+            sscYear: '',
+            hscYear: '',
+            whatsapp: '',
+            school: '',
+            college: '',
+            bio: '',
+            preparationScore: 0
           }, { merge: true });
         } else {
           await setDoc(userRef, {
@@ -135,6 +158,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const signInWithEmail = async (email: string, pass: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+    } catch (error) {
+      console.error("Error signing in with email", error);
+      throw error;
+    }
+  };
+
+  const signUpWithEmail = async (email: string, pass: string, name: string) => {
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, pass);
+      await updateProfile(result.user, { displayName: name });
+      // Force update local user state
+      setUser({ ...result.user, displayName: name } as User);
+    } catch (error) {
+      console.error("Error signing up with email", error);
+      throw error;
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (error) {
+      console.error("Error resetting password", error);
+      throw error;
+    }
+  };
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -159,7 +212,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isDeviceAuthorized = !userData?.boundDeviceId || userData.boundDeviceId === deviceId;
 
   return (
-    <AuthContext.Provider value={{ user, userData, loading, isDeviceAuthorized, signInWithGoogle, logout, updateUserProfile }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      userData, 
+      loading, 
+      isDeviceAuthorized, 
+      signInWithGoogle, 
+      signInWithEmail,
+      signUpWithEmail,
+      resetPassword,
+      logout, 
+      updateUserProfile 
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -63,7 +63,7 @@ export default function Pricing() {
         {isTrial && (
           <div className={`inline-block mt-4 px-4 py-2 rounded-lg text-sm font-medium ${isTrialExpired ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}`}>
             {isTrialExpired 
-              ? 'Your 3-month free trial has expired. Please upgrade to continue accessing premium features.'
+              ? 'Your 7-day free trial has expired. Please upgrade to continue accessing premium features.'
               : `You are currently on a free trial until ${trialEnds?.toLocaleDateString()}.`}
           </div>
         )}

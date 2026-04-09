@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { collection, query, limit, getDocs, where, addDoc } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { collection, query, limit, getDocs, where, addDoc, setDoc, doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Lock, Flag } from 'lucide-react';
+import { Lock, Flag, Clock, Sparkles, Loader2 } from 'lucide-react';
 import FeedbackModal from '../components/FeedbackModal';
+import Markdown from 'react-markdown';
 
 interface Question {
   id: string;
@@ -12,6 +13,7 @@ interface Question {
   options: string[];
   correct_answer: string;
   explanation_bn: string;
+  rationale?: string;
 }
 
 const SUBJECTS = [
@@ -36,9 +38,78 @@ export default function PracticeMode() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [score, setScore] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [isTimerEnabled, setIsTimerEnabled] = useState(false);
+  const [timerDuration, setTimerDuration] = useState(10); // minutes
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [activeSession, setActiveSession] = useState<any>(null);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+
+  useEffect(() => {
+    if (!user || hasStarted) return;
+
+    const checkSession = async () => {
+      const sessionDoc = await getDoc(doc(db, 'active_practice_sessions', user.uid));
+      if (sessionDoc.exists()) {
+        setActiveSession(sessionDoc.data());
+        setShowResumePrompt(true);
+      }
+    };
+    checkSession();
+  }, [user, hasStarted]);
+
+  const saveSession = async (
+    currentQuestions: any,
+    index: number,
+    currentScore: number,
+    ans: string | null,
+    expl: boolean,
+    time: number
+  ) => {
+    if (!user || isFinished) return;
+    try {
+      await setDoc(doc(db, 'active_practice_sessions', user.uid), {
+        userId: user.uid,
+        questions: currentQuestions,
+        currentIndex: index,
+        score: currentScore,
+        selectedAnswer: ans,
+        showExplanation: expl,
+        timeLeft: time,
+        selectedSubject,
+        isTimerEnabled,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error saving practice session", error);
+    }
+  };
+
+  const resumeSession = () => {
+    if (!activeSession) return;
+    setQuestions(activeSession.questions);
+    setCurrentIndex(activeSession.currentIndex);
+    setScore(activeSession.score);
+    setSelectedAnswer(activeSession.selectedAnswer);
+    setShowExplanation(activeSession.showExplanation);
+    setTimeLeft(activeSession.timeLeft);
+    setSelectedSubject(activeSession.selectedSubject);
+    setIsTimerEnabled(activeSession.isTimerEnabled);
+    setHasStarted(true);
+    setShowResumePrompt(false);
+  };
+
+  const discardSession = async () => {
+    if (user) {
+      await deleteDoc(doc(db, 'active_practice_sessions', user.uid));
+    }
+    setActiveSession(null);
+    setShowResumePrompt(false);
+  };
 
   const startPractice = async () => {
     setLoading(true);
@@ -53,6 +124,9 @@ export default function PracticeMode() {
       const qs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Question));
       setQuestions(qs);
       setHasStarted(true);
+      if (isTimerEnabled) {
+        setTimeLeft(timerDuration * 60);
+      }
     } catch (error) {
       console.error("Error fetching questions", error);
     } finally {
@@ -60,32 +134,151 @@ export default function PracticeMode() {
     }
   };
 
-  const handleAnswer = (option: string) => {
+  const saveResult = async () => {
+    if (user && questions.length > 0) {
+      await deleteDoc(doc(db, 'active_practice_sessions', user.uid));
+      await addDoc(collection(db, 'test_results'), {
+        userId: user.uid,
+        score: score,
+        totalQuestions: questions.length,
+        subject: selectedSubject === 'All Subjects' ? 'Mixed Practice' : selectedSubject,
+        createdAt: new Date().toISOString()
+      });
+
+      // Create notification for the user
+      await addDoc(collection(db, 'notifications'), {
+        userId: user.uid,
+        title: 'Practice Session Complete',
+        message: `You scored ${score}/${questions.length} in ${selectedSubject}. Great job!`,
+        type: 'success',
+        isRead: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+  };
+
+  useEffect(() => {
+    let timer: any;
+    if (hasStarted && !isFinished && isTimerEnabled && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          const next = prev - 1;
+          if (next % 10 === 0) {
+            saveSession(questions, currentIndex, score, selectedAnswer, showExplanation, next);
+          }
+          return next;
+        });
+      }, 1000);
+    } else if (hasStarted && !isFinished && isTimerEnabled && timeLeft === 0) {
+      setIsFinished(true);
+      saveResult();
+    }
+    return () => clearInterval(timer);
+  }, [hasStarted, isFinished, isTimerEnabled, timeLeft, questions, currentIndex, score, selectedAnswer, showExplanation]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasStarted && !isFinished) {
+        saveSession(questions, currentIndex, score, selectedAnswer, showExplanation, timeLeft);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasStarted, isFinished, questions, currentIndex, score, selectedAnswer, showExplanation, timeLeft]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleAnswer = async (option: string) => {
     if (selectedAnswer) return;
     setSelectedAnswer(option);
     setShowExplanation(true);
-    if (option === questions[currentIndex].correct_answer) {
-      setScore(prev => prev + 1);
+    
+    const currentQ = questions[currentIndex];
+    const isCorrect = option === currentQ.correct_answer;
+
+    let newScore = score;
+    if (isCorrect) {
+      newScore = score + 1;
+      setScore(newScore);
+    }
+
+    // Generate AI explanation if incorrect or if user wants more detail
+    if (!isCorrect) {
+      generateAiExplanation(currentQ, option);
+    }
+
+    saveSession(questions, currentIndex, newScore, option, true, timeLeft);
+  };
+
+  const generateAiExplanation = async (question: Question, chosenOption: string) => {
+    setIsGeneratingAi(true);
+    setAiExplanation('');
+    try {
+      const systemPrompt = "As an expert BCS (Bangladesh Civil Service) exam tutor, explain why the chosen answer is incorrect and why the correct answer is right. Provide a detailed, encouraging explanation in both English and Bengali if possible. Focus on the logic and concepts.";
+      const prompt = `
+        Question: ${question.question_text}
+        Options: ${question.options.join(', ')}
+        Chosen Answer: ${chosenOption}
+        Correct Answer: ${question.correct_answer}
+        ${question.rationale ? `Rationale provided: ${question.rationale}` : ''}
+        ${question.explanation_bn ? `Base Explanation: ${question.explanation_bn}` : ''}
+      `;
+
+      const response = await fetch('/api/ai/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, systemPrompt })
+      });
+
+      if (!response.ok) throw new Error('AI Stream failed');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('0:')) {
+              try {
+                const text = JSON.parse(line.substring(2));
+                accumulatedText += text;
+                setAiExplanation(accumulatedText);
+              } catch (e) {
+                // Ignore partial chunks
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error generating AI explanation:", error);
+      setAiExplanation("Sorry, I couldn't generate a detailed explanation right now. Please refer to the base explanation below.");
+    } finally {
+      setIsGeneratingAi(false);
     }
   };
 
   const handleNext = async () => {
     if (currentIndex < questions.length - 1) {
-      setCurrentIndex(prev => prev + 1);
+      const nextIndex = currentIndex + 1;
+      setCurrentIndex(nextIndex);
       setSelectedAnswer(null);
       setShowExplanation(false);
+      setAiExplanation(null);
+      saveSession(questions, nextIndex, score, null, false, timeLeft);
     } else {
       setIsFinished(true);
-      // Save result
-      if (user) {
-        await addDoc(collection(db, 'test_results'), {
-          userId: user.uid,
-          score: score + (selectedAnswer === questions[currentIndex].correct_answer ? 1 : 0),
-          totalQuestions: questions.length,
-          subject: selectedSubject === 'All Subjects' ? 'Mixed Practice' : selectedSubject,
-          createdAt: new Date().toISOString()
-        });
-      }
+      await saveResult();
     }
   };
 
@@ -117,32 +310,74 @@ export default function PracticeMode() {
 
   if (!hasStarted) {
     return (
-      <div className="max-w-2xl mx-auto text-center py-16 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Practice Mode</h1>
-        <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto">
-          Select a subject to focus your practice, or choose "All Subjects" for a mixed session.
-        </p>
-        
-        <div className="max-w-xs mx-auto mb-8">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Select Subject</label>
-          <select 
-            value={selectedSubject}
-            onChange={(e) => setSelectedSubject(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-          >
-            {SUBJECTS.map(sub => (
-              <option key={sub} value={sub}>{sub}</option>
-            ))}
-          </select>
-        </div>
+      <div className="max-w-2xl mx-auto space-y-8">
+        {showResumePrompt && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-6 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 dark:bg-blue-800 rounded-full">
+                <Clock className="w-6 h-6 text-blue-600 dark:text-blue-300" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100">Resume Practice?</h3>
+                <p className="text-sm text-blue-700 dark:text-blue-300">You have an unfinished {activeSession.selectedSubject} session from {new Date(activeSession.updatedAt).toLocaleString()}.</p>
+              </div>
+            </div>
+            <div className="flex gap-3 w-full sm:w-auto">
+              <button onClick={discardSession} className="flex-1 sm:flex-none px-6 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700">Discard</button>
+              <button onClick={resumeSession} className="flex-1 sm:flex-none px-6 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700">Resume</button>
+            </div>
+          </div>
+        )}
+        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Practice Mode</h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto">
+            Select a subject to focus your practice, or choose "All Subjects" for a mixed session.
+          </p>
+          
+          <div className="max-w-xs mx-auto mb-8 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Select Subject</label>
+              <select 
+                value={selectedSubject}
+                onChange={(e) => setSelectedSubject(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+              >
+                {SUBJECTS.map(sub => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Timer</label>
+              <input 
+                type="checkbox" 
+                checked={isTimerEnabled}
+                onChange={(e) => setIsTimerEnabled(e.target.checked)}
+                className="w-5 h-5 text-blue-600"
+              />
+            </div>
+            {isTimerEnabled && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 text-left">Duration (minutes)</label>
+                <input 
+                  type="number"
+                  value={timerDuration}
+                  onChange={(e) => setTimerDuration(parseInt(e.target.value))}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                />
+              </div>
+            )}
+          </div>
 
-        <button 
-          onClick={startPractice}
-          disabled={loading}
-          className="px-8 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50"
-        >
-          {loading ? 'Loading...' : 'Start Practice'}
-        </button>
+          <button 
+            onClick={startPractice}
+            disabled={loading}
+            className="px-8 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Loading...' : 'Start Practice'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -184,26 +419,31 @@ export default function PracticeMode() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Practice Mode</h1>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Practice Mode</h1>
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full sm:w-auto">
+          {isTimerEnabled && (
+            <div className={`px-3 py-1.5 rounded-full font-mono font-bold text-sm ${timeLeft < 60 ? 'bg-red-100 text-red-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
+              {formatTime(timeLeft)}
+            </div>
+          )}
           <button 
             onClick={() => {
               setShowFeedbackModal(true);
             }}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-500"
+            className="flex items-center gap-2 text-xs sm:text-sm text-gray-500 hover:text-red-500"
           >
             <Flag className="w-4 h-4" />
-            Flag Question
+            Flag
           </button>
-          <span className="px-4 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full font-medium">
-            Question {currentIndex + 1} of {questions.length}
+          <span className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full text-xs sm:text-sm font-medium ml-auto sm:ml-0">
+            {currentIndex + 1} / {questions.length}
           </span>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <h2 className="text-xl font-medium text-gray-900 dark:text-white mb-8">{currentQ.question_text}</h2>
+      <div className="bg-white dark:bg-gray-800 p-5 sm:p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+        <h2 className="text-lg sm:text-xl font-medium text-gray-900 dark:text-white mb-6 sm:mb-8 leading-relaxed">{currentQ.question_text}</h2>
         
         {showFeedbackModal && (
           <FeedbackModal 
@@ -214,7 +454,7 @@ export default function PracticeMode() {
 
         <div className="space-y-3">
           {currentQ.options.map((option, idx) => {
-            let btnClass = "w-full text-left px-6 py-4 rounded-xl border-2 transition-all ";
+            let btnClass = "w-full text-left px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl border-2 transition-all text-sm sm:text-base ";
             if (!selectedAnswer) {
               btnClass += "border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 dark:text-white";
             } else if (option === currentQ.correct_answer) {
@@ -239,9 +479,34 @@ export default function PracticeMode() {
         </div>
 
         {showExplanation && (
-          <div className="mt-8 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-900/50">
-            <h3 className="font-semibold text-blue-900 dark:text-blue-300 mb-2">Explanation:</h3>
-            <p className="text-blue-800 dark:text-blue-200">{currentQ.explanation_bn}</p>
+          <div className="mt-8 space-y-4">
+            {isGeneratingAi ? (
+              <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-900/50 flex items-center justify-center gap-3">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+                <p className="text-blue-700 dark:text-blue-300 font-medium">AI is generating a detailed explanation...</p>
+              </div>
+            ) : aiExplanation ? (
+              <div className="p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-bold text-indigo-900 dark:text-indigo-300">AI Detailed Analysis:</h3>
+                </div>
+                <div className="prose prose-indigo dark:prose-invert max-w-none text-indigo-800 dark:text-indigo-200 text-sm sm:text-base leading-relaxed">
+                  <Markdown>{aiExplanation}</Markdown>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-900/50">
+              <h3 className="font-semibold text-blue-900 dark:text-blue-300 mb-2">Explanation:</h3>
+              <p className="text-blue-800 dark:text-blue-200">{currentQ.explanation_bn}</p>
+            </div>
+            {currentQ.rationale && (
+              <div className="p-6 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-100 dark:border-purple-900/50">
+                <h3 className="font-semibold text-purple-900 dark:text-purple-300 mb-2">Rationale:</h3>
+                <p className="text-purple-800 dark:text-purple-200">{(currentQ as any).rationale}</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -249,7 +514,7 @@ export default function PracticeMode() {
           <div className="mt-8 flex justify-end">
             <button
               onClick={handleNext}
-              className="px-8 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-medium rounded-xl hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
+              className="w-full sm:w-auto px-8 py-3.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors shadow-lg"
             >
               {currentIndex < questions.length - 1 ? 'Next Question' : 'Finish Practice'}
             </button>
