@@ -75,14 +75,33 @@ async function startServer() {
   // AI Streaming Endpoint
   app.post("/api/ai/stream", async (req, res) => {
     try {
-      const { prompt, systemPrompt } = req.body;
+      const { prompt, systemPrompt, modelId } = req.body;
 
-      if (!process.env.GEMINI_API_KEY) {
+      let model;
+      
+      switch (modelId) {
+        case 'gemini-1.0-pro':
+          model = google("gemini-1.0-pro");
+          break;
+        case 'gemini-1.5-pro':
+          model = google("gemini-3.1-pro-preview");
+          break;
+        case 'claude-3-opus':
+          // For local/server usage, we'd need the anthropic provider here too
+          // But since we're primarily using Vercel serverless, this is a fallback
+          return res.status(501).json({ error: "Claude is only supported in serverless mode currently." });
+        case 'gemini-1.5-flash':
+        default:
+          model = google("gemini-3-flash-preview");
+          break;
+      }
+
+      if (modelId?.startsWith('gemini') && !process.env.GEMINI_API_KEY) {
         return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
       }
 
       const result = await streamText({
-        model: google("gemini-1.5-flash"),
+        model: model,
         system: systemPrompt || "You are a helpful assistant.",
         prompt: prompt,
       });

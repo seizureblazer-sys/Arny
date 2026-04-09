@@ -17,6 +17,15 @@ export default function NewsPipeline() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [streamedText, setStreamedText] = useState('');
+  const [selectedModel, setSelectedModel] = useState('gemini-1.5-flash');
+  const [autoApprove, setAutoApprove] = useState(false);
+
+  const models = [
+    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Fast)', icon: '⚡' },
+    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Smart)', icon: '🧠' },
+    { id: 'gemini-1.0-pro', name: 'Gemini 1.0 Pro (Legacy)', icon: '📜' },
+    { id: 'claude-3-opus', name: 'Claude 3 Opus (Premium)', icon: '🎭' },
+  ];
 
   const handleFetchAndProcess = async () => {
     if (!newsUrl.trim() && !newsText.trim()) return;
@@ -64,7 +73,7 @@ export default function NewsPipeline() {
       const response = await fetch('/api/ai/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemPrompt })
+        body: JSON.stringify({ prompt, systemPrompt, modelId: selectedModel })
       });
 
       if (!response.ok) throw new Error('AI Stream failed');
@@ -105,6 +114,13 @@ export default function NewsPipeline() {
           const jsonStr = accumulatedText.substring(startIdx, endIdx + 1);
           const data = JSON.parse(jsonStr);
           setPendingResult(data);
+          
+          // Auto-approve logic
+          if (autoApprove) {
+            toast.success("Auto-approving generated content...");
+            // We need to pass the data directly because setPendingResult is async
+            await saveToFirestore(data);
+          }
         } else {
           throw new Error("Could not find valid JSON in AI response");
         }
@@ -123,14 +139,18 @@ export default function NewsPipeline() {
 
   const handleApproveAndSave = async () => {
     if (!pendingResult) return;
+    await saveToFirestore(pendingResult);
+  };
+
+  const saveToFirestore = async (data: any) => {
     setIsSaving(true);
     
     try {
-      const subject = pendingResult.mapped_subjects?.[0]?.subject || 'General Knowledge';
-      const topic = pendingResult.mapped_subjects?.[0]?.topic || 'Current Affairs';
+      const subject = data.mapped_subjects?.[0]?.subject || 'General Knowledge';
+      const topic = data.mapped_subjects?.[0]?.topic || 'Current Affairs';
 
-      if (pendingResult.gk_points) {
-        for (const gk of pendingResult.gk_points) {
+      if (data.gk_points) {
+        for (const gk of data.gk_points) {
           await addDoc(collection(db, 'gk_points'), {
             subject,
             topic,
@@ -142,8 +162,8 @@ export default function NewsPipeline() {
         }
       }
 
-      if (pendingResult.questions) {
-        for (const q of pendingResult.questions) {
+      if (data.questions) {
+        for (const q of data.questions) {
           await addDoc(collection(db, 'questions'), {
             subject,
             topic,
@@ -205,6 +225,18 @@ export default function NewsPipeline() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">AI Model Selection</label>
+            <select
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none dark:bg-gray-700 dark:text-white text-sm sm:text-base"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              {models.map(m => (
+                <option key={m.id} value={m.id}>{m.icon} {m.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Number of GK Points</label>
             <input
               type="number"
@@ -215,6 +247,35 @@ export default function NewsPipeline() {
               onChange={(e) => setNumPoints(parseInt(e.target.value))}
             />
           </div>
+        </div>
+
+        <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "p-2 rounded-lg",
+              autoApprove ? "bg-green-100 dark:bg-green-900/30 text-green-600" : "bg-gray-100 dark:bg-gray-800 text-gray-400"
+            )}>
+              <RefreshCw className={cn("w-5 h-5", autoApprove && "animate-spin")} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">Autonomous Mode</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Automatically approve and save AI results</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setAutoApprove(!autoApprove)}
+            className={cn(
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
+              autoApprove ? "bg-green-600" : "bg-gray-300 dark:bg-gray-600"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                autoApprove ? "translate-x-6" : "translate-x-1"
+              )}
+            />
+          </button>
         </div>
 
         <div className="relative flex items-center py-2">
