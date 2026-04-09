@@ -1,19 +1,19 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "server.ts",
-      "use": "@vercel/node"
-    }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "server.ts"
+      "source": "/api/fetch-url",
+      "destination": "/api/fetch-url.ts"
+    },
+    {
+      "source": "/api/ai/stream",
+      "destination": "/api/ai-stream.ts"
     },
     {
       "source": "/(.*)",
-      "destination": "server.ts"
+      "destination": "/index.html"
     }
   ]
 }
